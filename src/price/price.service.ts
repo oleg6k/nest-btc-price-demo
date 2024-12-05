@@ -1,48 +1,58 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import axios from 'axios';
-import { Interval } from '@nestjs/schedule';
-import { ConfigService } from '../config/config.service';
-import { PriceDto } from './price.dto';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { AppConfigService } from '../config/app-config.service';
+import {
+  EXCHANGE_INTERFACE_TOKEN,
+  ExchangeInterface,
+} from '../exchange/exchange.interface';
+import { Price } from './price';
+import { PairsEnum } from '../exchange/pairs.enum';
+import { SchedulerRegistry } from '@nestjs/schedule';
 
 @Injectable()
 export class PriceService implements OnModuleInit {
-  private readonly logger = new Logger(PriceService.name);
-  private price: PriceDto | null = null;
+  private readonly logger: Logger = new Logger(PriceService.name);
+  private price: Price | null = null;
 
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private readonly configService: AppConfigService,
+    @Inject(EXCHANGE_INTERFACE_TOKEN)
+    private readonly exchangeService: ExchangeInterface,
+    private readonly schedulerRegistry: SchedulerRegistry,
+  ) {}
 
+  async onModuleInit(): Promise<void> {
+    this.logger.log('PriceService Init...');
+    await this.fetchPrice();
+
+    const interval = setInterval(() => {
+      this.fetchPrice();
+    }, this.configService.priceUpdateFrequency * 1000);
+
+    this.schedulerRegistry.addInterval('priceUpdate', interval);
+  }
+
+  //TODO: пары в аргументы метода
   async fetchPrice(): Promise<void> {
     try {
-      const response = await axios.get(
-        'https://api.binance.com/api/v3/ticker/bookTicker',
-        { params: { symbol: 'BTCUSDT' } },
+      const { bidPrice, askPrice } = await this.exchangeService.getTickerPrice(
+        PairsEnum.BTC_USDT,
       );
 
-      const { bidPrice, askPrice } = response.data;
-      const commission = this.configService.getServiceCommission() / 100;
+      this.price = new Price(
+        bidPrice,
+        askPrice,
+        this.configService.priceCommissionPercent,
+        this.configService.pricePrecision,
+      );
 
-      const bid = Number(bidPrice) * (1 - commission);
-      const ask = Number(askPrice) * (1 + commission);
-      const mid = (bid + ask) / 2;
-
-      this.price = new PriceDto();
-      this.logger.log(`Initial price fetched: ${JSON.stringify(this.price)}`);
+      this.logger.log(`Цена обновлена: ${JSON.stringify(this.price)}`);
     } catch (error) {
-      this.logger.error('Error fetching price during initialization', error);
-      throw new Error('Failed to fetch initial price');
+      this.logger.error('Ошибка при обновлении цены', error);
     }
   }
 
-  async onModuleInit(): Promise<any> {
-    await this.fetchPrice();
-  }
-
-  @Interval(Number(process.env.UPDATE_FREQUENCY_SEC) * 1000)
-  async handleScheduledUpdates(): Promise<void> {
-    await this.fetchPrice();
-  }
-
-  getPrice(): { bid: number; ask: number; mid: number } | null {
+  //TODO: пары в аргументы метода
+  getPrice(): Price | null {
     return this.price;
   }
 }

@@ -1,40 +1,45 @@
-// src/exchange/binance.exchange.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { ExchangeInterface } from './exchange.interface';
-import { ConfigService } from '../config/config.service';
 import { HttpServiceFactory } from '../http/http.service.factory';
+import { AxiosInstance } from 'axios';
+import { PairsEnum } from './pairs.enum';
 
 @Injectable()
 export class BinanceExchangeService implements ExchangeInterface {
-  private readonly logger = new Logger(BinanceExchangeService.name);
-  private readonly httpService;
+  private readonly logger: Logger = new Logger(BinanceExchangeService.name);
+  private readonly httpService: AxiosInstance;
+  private readonly baseUrl: string = 'https://api.binance.com/api/v3';
 
-  constructor(
-    private readonly configService: ConfigService,
-    httpServiceFactory: HttpServiceFactory,
-  ) {
-    // Создаём настроенный экземпляр HttpService для Binance
+  readonly pairs = {
+    [PairsEnum.BTC_USDT]: 'BTCUSDT',
+  };
+
+  constructor(httpServiceFactory: HttpServiceFactory) {
     this.httpService = httpServiceFactory.createHttpService({
-      baseURL: this.configService.getBinanceApiUrl(),
-      timeout: 5000, // Можно настроить специфичный таймаут
+      baseURL: this.baseUrl,
+      timeout: 5000,
     });
   }
 
   async getTickerPrice(
-    symbol: string,
-  ): Promise<{ bidPrice: string; askPrice: string }> {
+    pair: PairsEnum,
+  ): Promise<{ bidPrice: number; askPrice: number }> {
     try {
-      const response = await this.httpService.get('/ticker/bookTicker', {
+      const symbol = this.pairs[pair];
+      if (!symbol) {
+        throw new Error(`Pair ${pair} not supported`);
+      }
+
+      const { data } = await this.httpService.get('/ticker/bookTicker', {
         params: { symbol },
       });
+
       return {
-        bidPrice: response.data.bidPrice,
-        askPrice: response.data.askPrice,
+        bidPrice: Number(data.bidPrice),
+        askPrice: Number(data.askPrice),
       };
     } catch (error) {
-      this.logger.error(
-        `Ошибка при получении данных от Binance API: ${error.message}`,
-      );
+      this.logger.error(`getTickerPrice: ${error.message}`);
       throw error;
     }
   }
